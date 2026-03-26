@@ -40,6 +40,7 @@ After deploy, copy your Worker URL (example: `https://mtgg-server.<subdomain>.wo
 ## 2) Deploy the client (GitHub Pages)
 
 The workflow file is already set at `.github/workflows/deploy.yml`.
+It sets `VITE_BASE` dynamically to `/${{ github.event.repository.name }}/` so asset paths match the GitHub Pages repo URL.
 
 ### Required GitHub Secret
 In your GitHub repo settings, add this secret:

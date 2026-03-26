@@ -34,7 +34,7 @@ jobs:
         working-directory: mtgg-client
         env:
           VITE_WORKER_URL: ${{ secrets.VITE_WORKER_URL }}
-          VITE_BASE: /mtgg-client/
+          VITE_BASE: /${{ github.event.repository.name }}/
         run: npm run build
 
       - name: Deploy to gh-pages
