@@ -1,0 +1,44 @@
+name: Deploy MTGG Client
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'mtgg-client/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mtgg-client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: mtgg-client
+        run: npm ci
+
+      - name: Build
+        working-directory: mtgg-client
+        env:
+          VITE_WORKER_URL: ${{ secrets.VITE_WORKER_URL }}
+          VITE_BASE: /mtgg-client/
+        run: npm run build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: mtgg-client/dist

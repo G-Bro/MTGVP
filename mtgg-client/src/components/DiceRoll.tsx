@@ -1,0 +1,97 @@
+import React, { useState, useEffect } from 'react';
+import type { LocalSession, PeerEvent } from '../types';
+import { rollDie } from '../utils/helpers';
+import { useGame } from '../context/GameContext';
+
+interface Props {
+  session:   LocalSession;
+  broadcast: (event: PeerEvent) => void;
+  onOrderSet: () => void;
+}
+
+export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
+  const { state, dispatch } = useGame();
+  const [rolled, setRolled]     = useState(false);
+  const [ordering, setOrdering] = useState(false);
+
+  const allPlayerIds = [
+    session.playerId,
+    ...state.opponents.map(o => o.playerId),
+  ];
+
+  const playerName = (id: string) =>
+    id === session.playerId
+      ? state.localPlayer.name
+      : state.opponents.find(o => o.playerId === id)?.name ?? id;
+
+  // When all players have rolled, determine order
+  useEffect(() => {
+    if (ordering) return;
+    const rollCount = Object.keys(state.diceRolls).length;
+    if (rollCount < allPlayerIds.length || rollCount === 0) return;
+
+    setOrdering(true);
+
+    // Sort highest roll first; ties keep original join order as tiebreak
+    const sorted = [...allPlayerIds].sort((a, b) => {
+      const ra = state.diceRolls[a] ?? 0;
+      const rb = state.diceRolls[b] ?? 0;
+      return rb - ra;
+    });
+
+    dispatch({ type: 'SET_TURN_ORDER', order: sorted });
+
+    // Brief pause so players can see results before transitioning
+    setTimeout(onOrderSet, 2200);
+  }, [state.diceRolls, allPlayerIds.length, ordering, dispatch, onOrderSet, allPlayerIds]);
+
+  function handleRoll() {
+    if (rolled) return;
+    const value = rollDie(20);
+    dispatch({ type: 'RECORD_DICE_ROLL', playerId: session.playerId, value });
+    broadcast({ type: 'DICE_ROLL', value });
+    setRolled(true);
+  }
+
+  const allRolled    = allPlayerIds.every(id => state.diceRolls[id] !== undefined);
+  const sortedByRoll = [...allPlayerIds].sort(
+    (a, b) => (state.diceRolls[b] ?? -1) - (state.diceRolls[a] ?? -1),
+  );
+
+  return (
+    <div className="dice-roll-screen">
+      <h2>Roll for Turn Order</h2>
+      <p className="hint">Highest roll goes first. Roll your d20!</p>
+
+      <div className="dice-results">
+        {sortedByRoll.map((id, rank) => {
+          const val  = state.diceRolls[id];
+          const isMe = id === session.playerId;
+          return (
+            <div key={id} className={`dice-row ${isMe ? 'dice-row-me' : ''} ${val !== undefined ? 'dice-row-done' : ''}`}>
+              <span className="dice-rank">{val !== undefined ? `#${rank + 1}` : '—'}</span>
+              <span className="dice-name">{playerName(id)}{isMe ? ' (you)' : ''}</span>
+              <span className="dice-value">{val !== undefined ? `🎲 ${val}` : 'Waiting…'}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {!rolled && (
+        <button className="btn btn-primary btn-large roll-btn" onClick={handleRoll}>
+          Roll d20
+        </button>
+      )}
+
+      {rolled && !allRolled && (
+        <p className="hint">Waiting for all players to roll…</p>
+      )}
+
+      {allRolled && (
+        <p className="hint all-rolled">
+          All rolled — starting game…
+        </p>
+      )}
+    </div>
+  );
+}
