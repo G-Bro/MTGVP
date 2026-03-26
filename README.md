@@ -70,3 +70,4 @@ The workflow will build `mtgg-client` and publish `mtgg-client/dist` to `gh-page
 - `VITE_WORKER_URL` GitHub secret set
 - GitHub Pages enabled (source: `gh-pages` branch if prompted)
 - Frontend loads and can create/join rooms
+test
