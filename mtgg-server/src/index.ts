@@ -178,6 +178,7 @@ async function handleGetRoom(code: string, env: Env): Promise<Response> {
     status:  room.status,
     hostId:  room.hostId,
     players: room.players.map(publicPlayer),
+    diceRolls: room.diceRolls ?? {},
   });
 }
 

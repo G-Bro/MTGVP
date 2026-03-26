@@ -14,6 +14,7 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
   const { state, dispatch } = useGame();
   const [rolled, setRolled]     = useState(false);
   const [ordering, setOrdering] = useState(false);
+  const [syncError, setSyncError] = useState('');
 
   const allPlayerIds = [
     session.playerId,
@@ -59,7 +60,15 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
         token: session.token,
         value,
       }),
-    }).catch(() => { /* fallback remains WebRTC */ });
+    })
+      .then(res => {
+        if (!res.ok) {
+          setSyncError('Dice sync endpoint failed. Make sure latest Worker is deployed.');
+        }
+      })
+      .catch(() => {
+        setSyncError('Dice sync endpoint unreachable. Check Worker deployment/URL.');
+      });
     setRolled(true);
   }
 
@@ -81,16 +90,14 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
     return () => clearInterval(timer);
   }, [state.diceRolls, session.playerId, allRolled, broadcast]);
 
-  // Poll authoritative dice values from Worker so sync works even if WebRTC is flaky.
+  // Poll authoritative room state so dice sync follows the same path as lobby readiness.
   useEffect(() => {
     let active = true;
 
     async function pollDice() {
       if (!active) return;
       try {
-        const res = await fetch(
-          `${WORKER_URL}/rooms/${session.roomCode}/dice?playerId=${session.playerId}&token=${session.token}`,
-        );
+        const res = await fetch(`${WORKER_URL}/rooms/${session.roomCode}`);
         if (res.ok) {
           const data = await res.json() as { diceRolls?: Record<string, number> };
           const rolls = data.diceRolls ?? {};
@@ -137,6 +144,10 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
 
       {rolled && !allRolled && (
         <p className="hint">Waiting for all players to roll…</p>
+      )}
+
+      {syncError && (
+        <p className="form-error">{syncError}</p>
       )}
 
       {allRolled && (
