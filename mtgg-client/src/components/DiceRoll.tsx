@@ -58,6 +58,19 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
     (a, b) => (state.diceRolls[b] ?? -1) - (state.diceRolls[a] ?? -1),
   );
 
+  // DataChannels can come online slightly after entering this screen.
+  // Re-broadcast our roll until everyone has rolled so late peers catch it.
+  useEffect(() => {
+    const myRoll = state.diceRolls[session.playerId];
+    if (myRoll === undefined || allRolled) return;
+
+    const timer = setInterval(() => {
+      broadcast({ type: 'DICE_ROLL', value: myRoll });
+    }, 1200);
+
+    return () => clearInterval(timer);
+  }, [state.diceRolls, session.playerId, allRolled, broadcast]);
+
   return (
     <div className="dice-roll-screen">
       <h2>Roll for Turn Order</h2>
