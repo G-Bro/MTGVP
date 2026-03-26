@@ -7,5 +7,5 @@ compatibility_date = "2024-01-15"
 # Then paste the returned id and preview_id below.
 [[kv_namespaces]]
 binding = "ROOMS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_YOUR_PREVIEW_KV_NAMESPACE_ID"
+id = "0b6fdded75ee4869ba16c2c54a15847d"
+preview_id = "cf6db3564cd548d69686deaf27d46a17"
