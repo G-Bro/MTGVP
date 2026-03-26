@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { LocalSession, PeerEvent } from '../types';
 import { useGame } from '../context/GameContext';
 import { WORKER_URL } from '../utils/helpers';
@@ -13,6 +13,15 @@ interface Props {
 
 export default function GameBoard({ session, broadcast }: Props) {
   const { state, applyPeerEvent } = useGame();
+  const [cardScale, setCardScale] = useState<number>(() => {
+    const raw = localStorage.getItem('mtgg-card-scale');
+    const parsed = raw ? Number(raw) : 1;
+    return [0.9, 1, 1.2, 1.35, 1.5].includes(parsed) ? parsed : 1;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mtgg-card-scale', String(cardScale));
+  }, [cardScale]);
 
   useEffect(() => {
     const lp = state.localPlayer;
@@ -89,18 +98,28 @@ export default function GameBoard({ session, broadcast }: Props) {
   }, [session.roomCode, session.playerId, session.token, state.localPlayer, applyPeerEvent]);
 
   return (
-    <div className="game-shell">
+    <div className="game-shell" style={{ ['--card-scale' as string]: String(cardScale) }}>
       <header className="game-header">
         <div>
           <strong>Room</strong> {session.roomCode}
         </div>
-        <div>
+        <div className="game-header-right">
           <strong>Turn Order:</strong>{' '}
           {state.turnOrder.length
             ? state.turnOrder
                 .map(id => (id === session.playerId ? `${state.localPlayer.name || 'You'} (you)` : state.opponents.find(o => o.playerId === id)?.name || id))
                 .join('  ->  ')
             : 'Not set'}
+          <label className="card-size-control">
+            Card Size
+            <select value={cardScale} onChange={e => setCardScale(Number(e.target.value))}>
+              <option value={0.9}>90%</option>
+              <option value={1}>100%</option>
+              <option value={1.2}>120%</option>
+              <option value={1.35}>135%</option>
+              <option value={1.5}>150%</option>
+            </select>
+          </label>
         </div>
       </header>
 

@@ -309,6 +309,11 @@ textarea {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
+  --card-base-w: 95px;
+  --card-base-h: 132px;
+  --card-scale: 1;
+  --card-w: calc(var(--card-base-w) * var(--card-scale));
+  --card-h: calc(var(--card-base-h) * var(--card-scale));
 }
 
 .game-header {
@@ -319,6 +324,28 @@ textarea {
   border-bottom: 1px solid var(--line);
   background: rgba(16, 24, 19, 0.9);
   font-size: 0.9rem;
+}
+
+.game-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.card-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.card-size-control select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #122017;
+  color: var(--text);
+  padding: 0.2rem 0.35rem;
 }
 
 .game-grid {
@@ -392,7 +419,7 @@ textarea {
 
 .opp-battlefield {
   position: relative;
-  min-height: 170px;
+  min-height: calc(var(--card-h) + 88px);
 }
 
 .opp-card-wrapper {
@@ -401,8 +428,8 @@ textarea {
 }
 
 .opp-card {
-  width: 63px;
-  height: 88px;
+  width: var(--card-w);
+  height: var(--card-h);
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -471,7 +498,7 @@ textarea {
 
 .battlefield-zone {
   position: relative;
-  min-height: 220px;
+  min-height: calc(var(--card-h) + 88px);
   border: 1px dashed rgba(130, 164, 138, 0.38);
   border-radius: 10px;
   background:
@@ -485,6 +512,10 @@ textarea {
 
 .bf-card-wrap {
   position: absolute;
+}
+
+.bf-card-wrap.selected {
+  filter: drop-shadow(0 0 8px rgba(125, 226, 159, 0.75));
 }
 
 .bf-card-wrap.command-card::after {
@@ -527,6 +558,8 @@ textarea {
 /* Play card */
 .play-card {
   position: relative;
+  width: var(--card-w);
+  height: var(--card-h);
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -546,6 +579,11 @@ textarea {
 
 .play-card.ghost {
   opacity: 0.55;
+}
+
+.play-card.interactive.selected {
+  outline: 2px solid rgba(125, 226, 159, 0.8);
+  outline-offset: 1px;
 }
 
 .play-card-img,

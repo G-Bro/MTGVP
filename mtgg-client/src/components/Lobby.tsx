@@ -81,7 +81,7 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
   }, [session, connectToPeer, onGameStart]);
 
   async function copyShareInfo() {
-    const text = `Room code: ${session.roomCode}`;
+    const text = session.roomCode;
     await navigator.clipboard.writeText(text);
     setShareMsg('Copied!');
     setTimeout(() => setShareMsg(''), 2000);

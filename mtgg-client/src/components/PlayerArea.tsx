@@ -17,8 +17,11 @@ export default function PlayerArea({ broadcast }: Props) {
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [menu, setMenu]             = useState<ContextMenuState | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const battlefieldRef = useRef<HTMLDivElement | null>(null);
   const dragFromRef = useRef<Zone | null>(null);
+  const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
 
   function updateCounts() {
@@ -31,6 +34,22 @@ export default function PlayerArea({ broadcast }: Props) {
       if (Array.isArray(arr) && arr.some((c: any) => c.instanceId === instanceId)) return zone;
     }
     return null;
+  }
+
+  function findCard(instanceId: string) {
+    return lp.battlefield.find(c => c.instanceId === instanceId)
+      ?? lp.commandZone.find(c => c.instanceId === instanceId)
+      ?? lp.hand.find(c => c.instanceId === instanceId)
+      ?? lp.library.find(c => c.instanceId === instanceId)
+      ?? lp.graveyard.find(c => c.instanceId === instanceId)
+      ?? lp.exile.find(c => c.instanceId === instanceId);
+  }
+
+  function getCurrentCardSize(): { w: number; h: number } {
+    const root = getComputedStyle(document.documentElement);
+    const w = parseFloat(root.getPropertyValue('--card-w')) || 95;
+    const h = parseFloat(root.getPropertyValue('--card-h')) || 132;
+    return { w, h };
   }
 
   function moveCard(instanceId: string, to: Zone, position?: { x: number; y: number }) {
@@ -97,22 +116,54 @@ export default function PlayerArea({ broadcast }: Props) {
     );
   }
 
-  function pointerToBattlefieldPos(clientX: number, clientY: number): { x: number; y: number } | null {
+  function pointerToBattlefieldPos(clientX: number, clientY: number, offset?: { x: number; y: number } | null): { x: number; y: number } | null {
     const zone = battlefieldRef.current;
     if (!zone) return null;
     const rect = zone.getBoundingClientRect();
     if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
       return null;
     }
-    const xPct = ((clientX - rect.left) / rect.width) * 100;
-    const yPct = ((clientY - rect.top) / rect.height) * 100;
+    const xPx = clientX - rect.left - (offset?.x ?? 0);
+    const yPx = clientY - rect.top - (offset?.y ?? 0);
+    const xPct = (xPx / rect.width) * 100;
+    const yPct = (yPx / rect.height) * 100;
     return { x: Math.max(0, Math.min(95, xPct)), y: Math.max(0, Math.min(95, yPct)) };
+  }
+
+  function handleCardSelect(cardId: string, e: React.MouseEvent) {
+    setActiveCardId(cardId);
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      setSelectedIds(prev => prev.includes(cardId)
+        ? prev.filter(id => id !== cardId)
+        : [...prev, cardId]);
+      return;
+    }
+    setSelectedIds([cardId]);
   }
 
   function onCardMouseDown(e: React.MouseEvent, instanceId: string) {
     if (e.button !== 0) return;
     const from = findCardZone(instanceId);
     if (!from) return;
+
+    // Keep relative cursor offset for battlefield/command cards to prevent jump-on-click.
+    if (from === 'battlefield' || from === 'command') {
+      const card = findCard(instanceId);
+      const zone = battlefieldRef.current;
+      if (card && zone) {
+        const rect = zone.getBoundingClientRect();
+        const { w, h } = getCurrentCardSize();
+        const cardLeft = rect.left + (card.position.x / 100) * rect.width;
+        const cardTop = rect.top + (card.position.y / 100) * rect.height;
+        dragOffsetRef.current = {
+          x: Math.max(0, Math.min(w, e.clientX - cardLeft)),
+          y: Math.max(0, Math.min(h, e.clientY - cardTop)),
+        };
+      }
+    } else {
+      dragOffsetRef.current = null;
+    }
+
     dragFromRef.current = from;
     setDraggingId(instanceId);
   }
@@ -125,7 +176,7 @@ export default function PlayerArea({ broadcast }: Props) {
       rafRef.current = requestAnimationFrame(() => {
         const from = dragFromRef.current;
         if (!from || (from !== 'battlefield' && from !== 'command')) return;
-        const pos = pointerToBattlefieldPos(e.clientX, e.clientY);
+        const pos = pointerToBattlefieldPos(e.clientX, e.clientY, dragOffsetRef.current);
         if (!pos) return;
         dispatch({ type: 'POSITION_CARD', instanceId: draggingId, position: pos });
       });
@@ -133,7 +184,7 @@ export default function PlayerArea({ broadcast }: Props) {
 
     const handleUp = (e: MouseEvent) => {
       const from = dragFromRef.current;
-      const pos = pointerToBattlefieldPos(e.clientX, e.clientY);
+      const pos = pointerToBattlefieldPos(e.clientX, e.clientY, dragOffsetRef.current);
 
       if (pos) {
         if (from === 'battlefield' || from === 'command') {
@@ -148,6 +199,7 @@ export default function PlayerArea({ broadcast }: Props) {
       }
 
       dragFromRef.current = null;
+      dragOffsetRef.current = null;
       setDraggingId(null);
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -167,6 +219,39 @@ export default function PlayerArea({ broadcast }: Props) {
       }
     };
   }, [draggingId, dispatch, applyAndBroadcast, broadcast]);
+
+  function toggleTapMany(ids: string[]) {
+    const cards = ids
+      .map(id => lp.battlefield.find(c => c.instanceId === id) ?? lp.commandZone.find(c => c.instanceId === id))
+      .filter((c): c is NonNullable<typeof c> => !!c);
+    if (!cards.length) return;
+
+    const nextTapped = !cards.every(c => c.tapped);
+    for (const c of cards) {
+      applyAndBroadcast(
+        { type: 'TAP_CARD', instanceId: c.instanceId, tapped: nextTapped },
+        { type: 'TAP_CARD', instanceId: c.instanceId, tapped: nextTapped },
+        broadcast,
+      );
+    }
+  }
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
+      if (e.key.toLowerCase() !== 't') return;
+
+      const ids = selectedIds.length ? selectedIds : (activeCardId ? [activeCardId] : []);
+      if (!ids.length) return;
+
+      e.preventDefault();
+      toggleTapMany(ids);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedIds, activeCardId, lp.battlefield, lp.commandZone]);
 
   function toggleTap(instanceId: string, currentlyTapped: boolean) {
     applyAndBroadcast(
@@ -217,13 +302,17 @@ export default function PlayerArea({ broadcast }: Props) {
     }
 
     const id = menu.target.instanceId;
+    const selectedForMenu = selectedIds.includes(id) ? selectedIds : [id];
     const bfCard = lp.battlefield.find(c => c.instanceId === id)
       ?? lp.commandZone.find(c => c.instanceId === id);
 
     return [
       {
-        label: bfCard?.tapped ? 'Untap' : 'Tap',
-        action: () => { if (bfCard) toggleTap(id, bfCard.tapped); },
+        label: selectedForMenu.length > 1 ? 'Tap / Untap Selected (T)' : (bfCard?.tapped ? 'Untap' : 'Tap'),
+        action: () => {
+          if (!bfCard) return;
+          toggleTapMany(selectedForMenu);
+        },
       },
       { label: 'Add +1/+1 Counter', action: () => addCounter(id, '+1/+1', 1) },
       { label: 'Remove +1/+1 Counter', action: () => addCounter(id, '+1/+1', -1) },
@@ -233,7 +322,7 @@ export default function PlayerArea({ broadcast }: Props) {
       { label: 'Move to Hand', action: () => moveCard(id, 'hand') },
       { label: 'Move to Command Zone', action: () => moveCard(id, 'command') },
     ];
-  }, [menu, lp]);
+  }, [menu, lp, selectedIds]);
 
   return (
     <div className="player-area">
@@ -254,30 +343,42 @@ export default function PlayerArea({ broadcast }: Props) {
         {lp.commandZone.map(card => (
           <div
             key={card.instanceId}
-            className="bf-card-wrap command-card"
+            className={`bf-card-wrap command-card ${selectedIds.includes(card.instanceId) ? 'selected' : ''}`}
             style={{ left: `${card.position.x}%`, top: `${card.position.y}%` }}
           >
             <PlayCard
               card={card}
               interactive
-              onTap={() => toggleTap(card.instanceId, card.tapped)}
+              onTap={(c, e) => handleCardSelect(c.instanceId, e)}
               onMouseDown={e => onCardMouseDown(e, card.instanceId)}
-              onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, target: { kind: 'battlefield-card', instanceId: card.instanceId } })}
+              onContextMenu={(e) => {
+                if (!selectedIds.includes(card.instanceId)) {
+                  setSelectedIds([card.instanceId]);
+                  setActiveCardId(card.instanceId);
+                }
+                setMenu({ x: e.clientX, y: e.clientY, target: { kind: 'battlefield-card', instanceId: card.instanceId } });
+              }}
             />
           </div>
         ))}
         {lp.battlefield.map(card => (
           <div
             key={card.instanceId}
-            className="bf-card-wrap"
+            className={`bf-card-wrap ${selectedIds.includes(card.instanceId) ? 'selected' : ''}`}
             style={{ left: `${card.position.x}%`, top: `${card.position.y}%` }}
           >
             <PlayCard
               card={card}
               interactive
-              onTap={() => toggleTap(card.instanceId, card.tapped)}
+              onTap={(c, e) => handleCardSelect(c.instanceId, e)}
               onMouseDown={e => onCardMouseDown(e, card.instanceId)}
-              onContextMenu={(e) => setMenu({ x: e.clientX, y: e.clientY, target: { kind: 'battlefield-card', instanceId: card.instanceId } })}
+              onContextMenu={(e) => {
+                if (!selectedIds.includes(card.instanceId)) {
+                  setSelectedIds([card.instanceId]);
+                  setActiveCardId(card.instanceId);
+                }
+                setMenu({ x: e.clientX, y: e.clientY, target: { kind: 'battlefield-card', instanceId: card.instanceId } });
+              }}
             />
           </div>
         ))}

@@ -6,16 +6,13 @@ interface Props {
   card:          GameCard;
   /** True if rendered on the local-player battlefield (enables interactions). */
   interactive?:  boolean;
-  onTap?:        (id: string) => void;
+  onTap?:        (card: GameCard, e: React.MouseEvent) => void;
   onMouseDown?:  (e: React.MouseEvent, card: GameCard) => void;
   onContextMenu?:(e: React.MouseEvent, card: GameCard) => void;
   /** When true the card is shown as a dragging ghost (semi-transparent). */
   ghost?:        boolean;
   style?:        React.CSSProperties;
 }
-
-const CARD_W = 63;
-const CARD_H = 88;
 
 export default function PlayCard({
   card,
@@ -38,7 +35,7 @@ export default function PlayCard({
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    if (interactive && onTap) onTap(card.instanceId);
+    if (interactive && onTap) onTap(card, e);
   }
 
   function handleMouseDown(e: React.MouseEvent) {
@@ -56,7 +53,7 @@ export default function PlayCard({
   const cardContent = (
     <div
       className={cls}
-      style={{ width: CARD_W, height: CARD_H, ...style }}
+      style={style}
       onClick={handleClick}
       onMouseDown={handleMouseDown}
       onContextMenu={handleContextMenu}
