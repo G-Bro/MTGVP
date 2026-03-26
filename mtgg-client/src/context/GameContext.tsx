@@ -38,6 +38,7 @@ type GameAction =
   | { type: 'POSITION_CARD'; instanceId: string; position: { x: number; y: number } }
   | { type: 'MOVE_CARD'; instanceId: string; from: Zone; to: Zone; position?: { x: number; y: number } }
   | { type: 'DRAW_CARD' }
+  | { type: 'DRAW_OPENING_HAND'; count?: number }
   | { type: 'SHUFFLE_LIBRARY' }
   | { type: 'SET_LIFE'; life: number }
   | { type: 'SET_POISON'; poison: number }
@@ -150,6 +151,22 @@ function gameReducer(state: GameSession, action: GameAction): GameSession {
       };
     }
 
+    case 'DRAW_OPENING_HAND': {
+      const count = Math.max(0, action.count ?? 7);
+      const lib = [...state.localPlayer.library];
+      if (!lib.length || count === 0) return state;
+      const drawn = lib.slice(0, count);
+      const remaining = lib.slice(count);
+      return {
+        ...state,
+        localPlayer: {
+          ...state.localPlayer,
+          library: remaining,
+          hand: [...state.localPlayer.hand, ...drawn],
+        },
+      };
+    }
+
     case 'SHUFFLE_LIBRARY': {
       return {
         ...state,
@@ -177,9 +194,14 @@ function gameReducer(state: GameSession, action: GameAction): GameSession {
     case 'POSITION_CARD': {
       const update = (cards: GameCard[]) =>
         cards.map(c => c.instanceId === action.instanceId ? { ...c, position: action.position } : c);
+      const lp = state.localPlayer;
       return {
         ...state,
-        localPlayer: { ...state.localPlayer, battlefield: update(state.localPlayer.battlefield) },
+        localPlayer: {
+          ...lp,
+          battlefield: update(lp.battlefield),
+          commandZone: update(lp.commandZone),
+        },
       };
     }
 
@@ -261,6 +283,9 @@ function gameReducer(state: GameSession, action: GameAction): GameSession {
           return {
             ...o,
             battlefield: o.battlefield.map(c =>
+              c.instanceId === action.instanceId ? { ...c, position: action.position } : c,
+            ),
+            commandZone: o.commandZone.map(c =>
               c.instanceId === action.instanceId ? { ...c, position: action.position } : c,
             ),
           };

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import type { ContextMenuState, PeerEvent, Zone } from '../types';
 import { useGame } from '../context/GameContext';
 import PlayCard from './PlayCard';
@@ -17,6 +17,9 @@ export default function PlayerArea({ broadcast }: Props) {
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [menu, setMenu]             = useState<ContextMenuState | null>(null);
+  const battlefieldRef = useRef<HTMLDivElement | null>(null);
+  const dragFromRef = useRef<Zone | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   function updateCounts() {
     broadcast({ type: 'UPDATE_COUNTS', handCount: lp.hand.length, libraryCount: lp.library.length });
@@ -94,35 +97,76 @@ export default function PlayerArea({ broadcast }: Props) {
     );
   }
 
-  // ── Battlefield drag/drop ────────────────────────────────────────────────
-
-  function battlefieldDrop(e: React.MouseEvent) {
-    if (!draggingId) return;
-
-    const zone = e.currentTarget as HTMLDivElement;
+  function pointerToBattlefieldPos(clientX: number, clientY: number): { x: number; y: number } | null {
+    const zone = battlefieldRef.current;
+    if (!zone) return null;
     const rect = zone.getBoundingClientRect();
-    const xPct = ((e.clientX - rect.left) / rect.width) * 100;
-    const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-    const pos  = { x: Math.max(0, Math.min(95, xPct)), y: Math.max(0, Math.min(95, yPct)) };
-
-    const from = findCardZone(draggingId);
-    if (from === 'battlefield') {
-      applyAndBroadcast(
-        { type: 'POSITION_CARD', instanceId: draggingId, position: pos },
-        { type: 'POSITION_CARD', instanceId: draggingId, position: pos },
-        broadcast,
-      );
-    } else {
-      moveCard(draggingId, 'battlefield', pos);
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+      return null;
     }
-
-    setDraggingId(null);
+    const xPct = ((clientX - rect.left) / rect.width) * 100;
+    const yPct = ((clientY - rect.top) / rect.height) * 100;
+    return { x: Math.max(0, Math.min(95, xPct)), y: Math.max(0, Math.min(95, yPct)) };
   }
 
   function onCardMouseDown(e: React.MouseEvent, instanceId: string) {
     if (e.button !== 0) return;
+    const from = findCardZone(instanceId);
+    if (!from) return;
+    dragFromRef.current = from;
     setDraggingId(instanceId);
   }
+
+  useEffect(() => {
+    if (!draggingId) return;
+
+    const handleMove = (e: MouseEvent) => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        const from = dragFromRef.current;
+        if (!from || (from !== 'battlefield' && from !== 'command')) return;
+        const pos = pointerToBattlefieldPos(e.clientX, e.clientY);
+        if (!pos) return;
+        dispatch({ type: 'POSITION_CARD', instanceId: draggingId, position: pos });
+      });
+    };
+
+    const handleUp = (e: MouseEvent) => {
+      const from = dragFromRef.current;
+      const pos = pointerToBattlefieldPos(e.clientX, e.clientY);
+
+      if (pos) {
+        if (from === 'battlefield' || from === 'command') {
+          applyAndBroadcast(
+            { type: 'POSITION_CARD', instanceId: draggingId, position: pos },
+            { type: 'POSITION_CARD', instanceId: draggingId, position: pos },
+            broadcast,
+          );
+        } else {
+          moveCard(draggingId, 'battlefield', pos);
+        }
+      }
+
+      dragFromRef.current = null;
+      setDraggingId(null);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp, { once: true });
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [draggingId, dispatch, applyAndBroadcast, broadcast]);
 
   function toggleTap(instanceId: string, currentlyTapped: boolean) {
     applyAndBroadcast(
@@ -200,8 +244,8 @@ export default function PlayerArea({ broadcast }: Props) {
       </div>
 
       <div
+        ref={battlefieldRef}
         className={`battlefield-zone ${draggingId ? 'drop-active' : ''}`}
-        onMouseUp={battlefieldDrop}
         onContextMenu={e => {
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY, target: { kind: 'deck' } });

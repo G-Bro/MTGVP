@@ -37,7 +37,21 @@ interface RoomData {
   players: PlayerRecord[];
   status: 'lobby' | 'started' | 'ended';
   diceRolls: Record<string, number>;
+  publicStates: Record<string, PublicPlayerState>;
   createdAt: number;
+}
+
+interface PublicPlayerState {
+  name: string;
+  life: number;
+  poison: number;
+  handCount: number;
+  libraryCount: number;
+  battlefield: unknown[];
+  graveyard: unknown[];
+  exile: unknown[];
+  commandZone: unknown[];
+  ts: number;
 }
 
 type SignalType = 'offer' | 'answer' | 'ice-candidate';
@@ -163,6 +177,7 @@ async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
     }],
     status: 'lobby',
     diceRolls: {},
+    publicStates: {},
     createdAt: Date.now(),
   };
 
@@ -244,6 +259,7 @@ async function handleStart(code: string, request: Request, env: Env): Promise<Re
 
   room.status = 'started';
   room.diceRolls = {};
+  room.publicStates = {};
   await putRoom(env, room);
   return json({ ok: true });
 }
@@ -324,6 +340,43 @@ async function handleGetDice(code: string, url: URL, env: Env): Promise<Response
   return json({ diceRolls: room.diceRolls ?? {} });
 }
 
+async function handlePostState(code: string, request: Request, env: Env): Promise<Response> {
+  const room = await getRoom(env, code);
+  if (!room) return err('Room not found', 404);
+
+  const body = await request.json<{
+    playerId?: string;
+    token?: string;
+    state?: Omit<PublicPlayerState, 'ts'>;
+  }>();
+
+  const player = room.players.find(p => p.id === body.playerId);
+  if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
+  if (!body.state) return err('state is required');
+
+  room.publicStates[player.id] = {
+    ...body.state,
+    ts: Date.now(),
+  };
+
+  await putRoom(env, room);
+  return json({ ok: true });
+}
+
+async function handleGetState(code: string, url: URL, env: Env): Promise<Response> {
+  const room = await getRoom(env, code);
+  if (!room) return err('Room not found', 404);
+
+  const playerId = url.searchParams.get('playerId');
+  const token    = url.searchParams.get('token');
+  if (!playerId || !token) return err('playerId and token are required');
+
+  const player = room.players.find(p => p.id === playerId);
+  if (!player || !verifyToken(player, token)) return err('Unauthorized', 403);
+
+  return json({ states: room.publicStates ?? {} });
+}
+
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
 export default {
@@ -377,6 +430,14 @@ export default {
       // GET /rooms/:code/dice?playerId=...&token=...
       if (upperCode && action === 'dice' && request.method === 'GET')
         return handleGetDice(upperCode, url, env);
+
+      // POST /rooms/:code/state
+      if (upperCode && action === 'state' && request.method === 'POST')
+        return handlePostState(upperCode, request, env);
+
+      // GET /rooms/:code/state?playerId=...&token=...
+      if (upperCode && action === 'state' && request.method === 'GET')
+        return handleGetState(upperCode, url, env);
 
       return err('Not found', 404);
     } catch (e) {

@@ -70,6 +70,7 @@ export default function App() {
   }
 
   function handleOrderSet() {
+    dispatch({ type: 'DRAW_OPENING_HAND', count: 7 });
     dispatch({ type: 'SET_PHASE', phase: 'game' });
     setScreen('game');
 

@@ -245,6 +245,23 @@ textarea {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.commander-select-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.84rem;
+}
+
+.commander-select {
+  min-width: 260px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #121c16;
+  color: var(--text);
 }
 
 .deck-locked-msg {

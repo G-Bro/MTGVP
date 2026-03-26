@@ -23,10 +23,14 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
   const [deckError, setDeckError]     = useState('');
   const [deckLocked, setDeckLocked]   = useState(false);
   const [shareMsg, setShareMsg]       = useState('');
+  const [commanderOptions, setCommanderOptions] = useState<string[]>([]);
+  const [selectedCommander, setSelectedCommander] = useState('');
+  const [loadedCards, setLoadedCards] = useState<GameCard[]>([]);
 
   const lockedDeckRef = useRef<{ library: GameCard[]; commandZone: GameCard[] } | null>(null);
 
   const connectedPeers = useRef<Set<string>>(new Set());
+  const connectingPeers = useRef<Set<string>>(new Set());
   const gameStartedRef  = useRef(false);
 
   useEffect(() => {
@@ -43,12 +47,20 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
 
         for (const p of data.players ?? []) {
           if (p.id === session.playerId) continue;
-          if (!connectedPeers.current.has(p.id)) {
-            connectedPeers.current.add(p.id);
-            const myRecord = data.players?.find(x => x.id === session.playerId);
-            if (myRecord && p.joinedAt < myRecord.joinedAt) {
-              connectToPeer(p.id);
-            }
+          const myRecord = data.players?.find(x => x.id === session.playerId);
+          const shouldInitiate = !!myRecord && p.joinedAt < myRecord.joinedAt;
+          if (shouldInitiate && !connectedPeers.current.has(p.id) && !connectingPeers.current.has(p.id)) {
+            connectingPeers.current.add(p.id);
+            connectToPeer(p.id)
+              .then(() => {
+                connectedPeers.current.add(p.id);
+              })
+              .catch(() => {
+                // Retry on next poll if offer creation/signaling failed.
+              })
+              .finally(() => {
+                connectingPeers.current.delete(p.id);
+              });
           }
         }
 
@@ -92,16 +104,65 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
       return;
     }
 
-    const commandZone = cards.filter((_, i) => allEntries[i]?.isCommander);
-    const library     = shuffle(cards.filter((_, i) => !allEntries[i]?.isCommander));
+    const commanderFromSection = parsed.commander
+      .map(e => e.name)
+      .filter((name, i, arr) => arr.indexOf(name) === i);
+
+    // Autodetect fallback when no Commander section is present.
+    const nameCounts = new Map<string, number>();
+    for (const entry of allEntries) {
+      nameCounts.set(entry.name.toLowerCase(), (nameCounts.get(entry.name.toLowerCase()) ?? 0) + entry.quantity);
+    }
+
+    const autodetected = cards
+      .filter(c => {
+        const type = c.typeLine.toLowerCase();
+        const isLegendary = type.includes('legendary');
+        const canBeCommander = type.includes('creature') || type.includes('planeswalker');
+        const singleCopy = (nameCounts.get(c.name.toLowerCase()) ?? 0) === 1;
+        return isLegendary && canBeCommander && singleCopy;
+      })
+      .map(c => c.name)
+      .filter((name, i, arr) => arr.indexOf(name) === i);
+
+    const options = commanderFromSection.length ? commanderFromSection : autodetected;
+    setCommanderOptions(options);
+
+    const picked = commanderFromSection.length
+      ? commanderFromSection[0]
+      : (autodetected[0] ?? '');
+    setSelectedCommander(picked);
+
+    const { library, commandZone } = splitDeckForCommander(cards, picked);
+    setLoadedCards(cards);
 
     lockedDeckRef.current = { library, commandZone };
     dispatch({ type: 'LOAD_DECK', library, commandZone });
+
+    if (!picked) {
+      setDeckError('No commander detected. Select one manually from your list.');
+    } else if (!commanderFromSection.length && autodetected.length > 1) {
+      setDeckError('Multiple possible commanders detected. Select the correct one.');
+    } else {
+      setDeckError('');
+    }
+
     setDeckStatus('ready');
   }
 
+  useEffect(() => {
+    if (deckStatus !== 'ready' || !loadedCards.length) return;
+    const { library, commandZone } = splitDeckForCommander(loadedCards, selectedCommander);
+    lockedDeckRef.current = { library, commandZone };
+    dispatch({ type: 'LOAD_DECK', library, commandZone });
+  }, [selectedCommander, deckStatus, loadedCards, dispatch]);
+
   async function lockDeck() {
     if (deckStatus !== 'ready') return;
+    if (!selectedCommander) {
+      setDeckError('Choose a commander before locking in.');
+      return;
+    }
     try {
       await fetch(`${WORKER_URL}/rooms/${session.roomCode}/ready`, {
         method:  'POST',
@@ -188,6 +249,21 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
           <div className="deck-actions">
             {!deckLocked && (
               <>
+                {deckStatus === 'ready' && commanderOptions.length > 1 && (
+                  <label className="commander-select-wrap">
+                    Commander
+                    <select
+                      className="commander-select"
+                      value={selectedCommander}
+                      onChange={e => setSelectedCommander(e.target.value)}
+                    >
+                      <option value="">Select commander…</option>
+                      {commanderOptions.map(name => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <button
                   className="btn btn-secondary"
                   onClick={loadDeck}
@@ -227,4 +303,21 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
       )}
     </div>
   );
+}
+
+function splitDeckForCommander(cards: GameCard[], commanderName: string): { library: GameCard[]; commandZone: GameCard[] } {
+  if (!commanderName) {
+    return { library: shuffle([...cards]), commandZone: [] };
+  }
+
+  const index = cards.findIndex(c => c.name.toLowerCase() === commanderName.toLowerCase());
+  if (index < 0) return { library: shuffle([...cards]), commandZone: [] };
+
+  const commanderCard = {
+    ...cards[index],
+    position: { x: 6, y: 10 },
+  };
+
+  const library = shuffle(cards.filter((_, i) => i !== index));
+  return { library, commandZone: [commanderCard] };
 }
