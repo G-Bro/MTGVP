@@ -44,7 +44,8 @@ It sets `VITE_BASE` dynamically to `/${{ github.event.repository.name }}/` so as
 
 ### Required GitHub Secret
 In your GitHub repo settings, add this secret:
-- `VITE_WORKER_URL` = your deployed Worker URL
+- `VITE_WORKER_URL` = your deployed Worker URL, including protocol
+	- Example: `https://mtgvp.georgehbroadhurst.workers.dev`
 
 ### Commands (PowerShell)
 
