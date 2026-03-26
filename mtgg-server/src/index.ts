@@ -36,6 +36,7 @@ interface RoomData {
   passwordHash: string | null;
   players: PlayerRecord[];
   status: 'lobby' | 'started' | 'ended';
+  diceRolls: Record<string, number>;
   createdAt: number;
 }
 
@@ -161,6 +162,7 @@ async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
       joinedAt: Date.now(),
     }],
     status: 'lobby',
+    diceRolls: {},
     createdAt: Date.now(),
   };
 
@@ -240,6 +242,7 @@ async function handleStart(code: string, request: Request, env: Env): Promise<Re
   if (!room.players.every(p => p.deckLocked)) return err('All players must lock in a deck first');
 
   room.status = 'started';
+  room.diceRolls = {};
   await putRoom(env, room);
   return json({ ok: true });
 }
@@ -288,6 +291,38 @@ async function handlePollSignals(code: string, url: URL, env: Env): Promise<Resp
   return json({ signals });
 }
 
+async function handlePostDice(code: string, request: Request, env: Env): Promise<Response> {
+  const room = await getRoom(env, code);
+  if (!room) return err('Room not found', 404);
+
+  const body = await request.json<{ playerId?: string; token?: string; value?: number }>();
+  const player = room.players.find(p => p.id === body.playerId);
+  if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
+
+  const value = Number(body.value);
+  if (!Number.isInteger(value) || value < 1 || value > 20) {
+    return err('value must be an integer between 1 and 20');
+  }
+
+  room.diceRolls[player.id] = value;
+  await putRoom(env, room);
+  return json({ ok: true, diceRolls: room.diceRolls });
+}
+
+async function handleGetDice(code: string, url: URL, env: Env): Promise<Response> {
+  const room = await getRoom(env, code);
+  if (!room) return err('Room not found', 404);
+
+  const playerId = url.searchParams.get('playerId');
+  const token    = url.searchParams.get('token');
+  if (!playerId || !token) return err('playerId and token are required');
+
+  const player = room.players.find(p => p.id === playerId);
+  if (!player || !verifyToken(player, token)) return err('Unauthorized', 403);
+
+  return json({ diceRolls: room.diceRolls ?? {} });
+}
+
 // ─── Main fetch handler ───────────────────────────────────────────────────────
 
 export default {
@@ -333,6 +368,14 @@ export default {
       // GET /rooms/:code/signals?playerId=...&token=...
       if (upperCode && action === 'signals' && request.method === 'GET')
         return handlePollSignals(upperCode, url, env);
+
+      // POST /rooms/:code/dice
+      if (upperCode && action === 'dice' && request.method === 'POST')
+        return handlePostDice(upperCode, request, env);
+
+      // GET /rooms/:code/dice?playerId=...&token=...
+      if (upperCode && action === 'dice' && request.method === 'GET')
+        return handleGetDice(upperCode, url, env);
 
       return err('Not found', 404);
     } catch (e) {

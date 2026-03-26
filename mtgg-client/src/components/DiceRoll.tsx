@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { LocalSession, PeerEvent } from '../types';
 import { rollDie } from '../utils/helpers';
+import { WORKER_URL } from '../utils/helpers';
 import { useGame } from '../context/GameContext';
 
 interface Props {
@@ -50,6 +51,15 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
     const value = rollDie(20);
     dispatch({ type: 'RECORD_DICE_ROLL', playerId: session.playerId, value });
     broadcast({ type: 'DICE_ROLL', value });
+    fetch(`${WORKER_URL}/rooms/${session.roomCode}/dice`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        playerId: session.playerId,
+        token: session.token,
+        value,
+      }),
+    }).catch(() => { /* fallback remains WebRTC */ });
     setRolled(true);
   }
 
@@ -70,6 +80,35 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
 
     return () => clearInterval(timer);
   }, [state.diceRolls, session.playerId, allRolled, broadcast]);
+
+  // Poll authoritative dice values from Worker so sync works even if WebRTC is flaky.
+  useEffect(() => {
+    let active = true;
+
+    async function pollDice() {
+      if (!active) return;
+      try {
+        const res = await fetch(
+          `${WORKER_URL}/rooms/${session.roomCode}/dice?playerId=${session.playerId}&token=${session.token}`,
+        );
+        if (res.ok) {
+          const data = await res.json() as { diceRolls?: Record<string, number> };
+          const rolls = data.diceRolls ?? {};
+          for (const [playerId, value] of Object.entries(rolls)) {
+            if (state.diceRolls[playerId] !== value) {
+              dispatch({ type: 'RECORD_DICE_ROLL', playerId, value });
+            }
+          }
+        }
+      } catch {
+        // ignore transient poll failures
+      }
+      if (active && !allRolled) setTimeout(pollDice, 1000);
+    }
+
+    pollDice();
+    return () => { active = false; };
+  }, [session.roomCode, session.playerId, session.token, allRolled, dispatch, state.diceRolls]);
 
   return (
     <div className="dice-roll-screen">
