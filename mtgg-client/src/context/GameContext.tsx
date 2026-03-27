@@ -39,6 +39,9 @@ type GameAction =
   | { type: 'MOVE_CARD'; instanceId: string; from: Zone; to: Zone; position?: { x: number; y: number } }
   | { type: 'DRAW_CARD' }
   | { type: 'DRAW_OPENING_HAND'; count?: number }
+  | { type: 'MULLIGAN_RESET_DRAW'; count?: number }
+  | { type: 'BOTTOM_HAND_CARDS'; instanceIds: string[] }
+  | { type: 'PICK_FROM_LIBRARY'; instanceIds: string[] }
   | { type: 'SHUFFLE_LIBRARY' }
   | { type: 'SET_LIFE'; life: number }
   | { type: 'SET_POISON'; poison: number }
@@ -163,6 +166,56 @@ function gameReducer(state: GameSession, action: GameAction): GameSession {
           ...state.localPlayer,
           library: remaining,
           hand: [...state.localPlayer.hand, ...drawn],
+        },
+      };
+    }
+
+    case 'MULLIGAN_RESET_DRAW': {
+      const count = Math.max(0, action.count ?? 7);
+      const deck = shuffle([...state.localPlayer.library, ...state.localPlayer.hand]);
+      const drawn = deck.slice(0, count);
+      const remaining = deck.slice(count);
+      return {
+        ...state,
+        localPlayer: {
+          ...state.localPlayer,
+          library: remaining,
+          hand: drawn,
+        },
+      };
+    }
+
+    case 'BOTTOM_HAND_CARDS': {
+      if (!action.instanceIds.length) return state;
+      const ids = new Set(action.instanceIds);
+      const hand = [...state.localPlayer.hand];
+      const keep = hand.filter(c => !ids.has(c.instanceId));
+      const toBottom = hand.filter(c => ids.has(c.instanceId));
+      return {
+        ...state,
+        localPlayer: {
+          ...state.localPlayer,
+          hand: keep,
+          library: [...state.localPlayer.library, ...toBottom],
+        },
+      };
+    }
+
+    case 'PICK_FROM_LIBRARY': {
+      if (!action.instanceIds.length) return state;
+      const ids = new Set(action.instanceIds);
+      const picked: GameCard[] = [];
+      for (const id of action.instanceIds) {
+        const card = state.localPlayer.library.find(c => c.instanceId === id);
+        if (card) picked.push(card);
+      }
+      const remaining = state.localPlayer.library.filter(c => !ids.has(c.instanceId));
+      return {
+        ...state,
+        localPlayer: {
+          ...state.localPlayer,
+          library: remaining,
+          hand: [...state.localPlayer.hand, ...picked],
         },
       };
     }

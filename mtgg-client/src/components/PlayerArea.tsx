@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import type { ContextMenuState, PeerEvent, Zone } from '../types';
+import type { ContextMenuState, GameCard, PeerEvent, Zone } from '../types';
 import { useGame } from '../context/GameContext';
 import PlayCard from './PlayCard';
 import LifeCounter from './LifeCounter';
@@ -19,9 +19,17 @@ export default function PlayerArea({ broadcast }: Props) {
   const [menu, setMenu]             = useState<ContextMenuState | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    card: GameCard;
+    x: number;
+    y: number;
+    tiltX: number;
+    tiltY: number;
+  } | null>(null);
   const battlefieldRef = useRef<HTMLDivElement | null>(null);
   const dragFromRef = useRef<Zone | null>(null);
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const rafRef = useRef<number | null>(null);
 
   function updateCounts() {
@@ -145,14 +153,16 @@ export default function PlayerArea({ broadcast }: Props) {
     if (e.button !== 0) return;
     const from = findCardZone(instanceId);
     if (!from) return;
+    const card = findCard(instanceId);
+    if (!card) return;
+
+    const { w, h } = getCurrentCardSize();
 
     // Keep relative cursor offset for battlefield/command cards to prevent jump-on-click.
     if (from === 'battlefield' || from === 'command') {
-      const card = findCard(instanceId);
       const zone = battlefieldRef.current;
       if (card && zone) {
         const rect = zone.getBoundingClientRect();
-        const { w, h } = getCurrentCardSize();
         const cardLeft = rect.left + (card.position.x / 100) * rect.width;
         const cardTop = rect.top + (card.position.y / 100) * rect.height;
         dragOffsetRef.current = {
@@ -161,8 +171,18 @@ export default function PlayerArea({ broadcast }: Props) {
         };
       }
     } else {
-      dragOffsetRef.current = null;
+      // Hand cards center under cursor slightly offset from exact middle.
+      dragOffsetRef.current = { x: w * 0.45, y: h * 0.35 };
     }
+
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
+    setDragGhost({
+      card,
+      x: e.clientX,
+      y: e.clientY,
+      tiltX: 0,
+      tiltY: 0,
+    });
 
     dragFromRef.current = from;
     setDraggingId(instanceId);
@@ -175,10 +195,28 @@ export default function PlayerArea({ broadcast }: Props) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => {
         const from = dragFromRef.current;
-        if (!from || (from !== 'battlefield' && from !== 'command')) return;
-        const pos = pointerToBattlefieldPos(e.clientX, e.clientY, dragOffsetRef.current);
-        if (!pos) return;
-        dispatch({ type: 'POSITION_CARD', instanceId: draggingId, position: pos });
+        if (!from) return;
+
+        const prev = lastPointerRef.current ?? { x: e.clientX, y: e.clientY };
+        const dx = e.clientX - prev.x;
+        const dy = e.clientY - prev.y;
+        lastPointerRef.current = { x: e.clientX, y: e.clientY };
+
+        const tiltY = Math.max(-8, Math.min(8, -dx * 0.35));
+        const tiltX = Math.max(-6, Math.min(6, dy * 0.18));
+        setDragGhost(prevGhost => prevGhost ? {
+          ...prevGhost,
+          x: e.clientX,
+          y: e.clientY,
+          tiltX,
+          tiltY,
+        } : null);
+
+        if (from === 'battlefield' || from === 'command') {
+          const pos = pointerToBattlefieldPos(e.clientX, e.clientY, dragOffsetRef.current);
+          if (!pos) return;
+          dispatch({ type: 'POSITION_CARD', instanceId: draggingId, position: pos });
+        }
       });
     };
 
@@ -200,6 +238,8 @@ export default function PlayerArea({ broadcast }: Props) {
 
       dragFromRef.current = null;
       dragOffsetRef.current = null;
+      lastPointerRef.current = null;
+      setDragGhost(null);
       setDraggingId(null);
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -402,7 +442,7 @@ export default function PlayerArea({ broadcast }: Props) {
 
       <div className="hand-zone">
         {lp.hand.map(card => (
-          <div key={card.instanceId} className="hand-card">
+          <div key={card.instanceId} className={`hand-card ${draggingId === card.instanceId ? 'dragging-source' : ''}`}>
             <PlayCard
               card={card}
               interactive
@@ -412,6 +452,19 @@ export default function PlayerArea({ broadcast }: Props) {
           </div>
         ))}
       </div>
+
+      {dragGhost && dragOffsetRef.current && (
+        <div
+          className="drag-ghost"
+          style={{
+            left: dragGhost.x - dragOffsetRef.current.x,
+            top: dragGhost.y - dragOffsetRef.current.y,
+            transform: `perspective(900px) rotateX(${dragGhost.tiltX}deg) rotateY(${dragGhost.tiltY}deg) scale(1.08)`,
+          }}
+        >
+          <PlayCard card={dragGhost.card} ghost />
+        </div>
+      )}
 
       {menu && (
         <ContextMenu

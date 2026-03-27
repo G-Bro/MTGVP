@@ -8,7 +8,7 @@ import { useGame } from '../context/GameContext';
 interface Props {
   session: LocalSession;
   connectToPeer: (peerId: string) => Promise<void>;
-  onGameStart: (opponents: { id: string; name: string }[]) => void;
+  onGameStart: (opponents: { id: string; name: string }[], topDeckEnabled: boolean) => void;
 }
 
 const POLL_ROOM_MS = 2500;
@@ -23,6 +23,7 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
   const [deckError, setDeckError]     = useState('');
   const [deckLocked, setDeckLocked]   = useState(false);
   const [shareMsg, setShareMsg]       = useState('');
+  const [topDeckEnabled, setTopDeckEnabled] = useState(false);
   const [commanderOptions, setCommanderOptions] = useState<string[]>([]);
   const [selectedCommander, setSelectedCommander] = useState('');
   const [loadedCards, setLoadedCards] = useState<GameCard[]>([]);
@@ -41,9 +42,10 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
       try {
         const res  = await fetch(`${WORKER_URL}/rooms/${session.roomCode}`);
         if (!res.ok) return;
-        const data = await res.json() as { players?: LobbyPlayer[]; hostId?: string; status?: string };
+        const data = await res.json() as { players?: LobbyPlayer[]; hostId?: string; status?: string; topDeckEnabled?: boolean };
         setPlayers(data.players ?? []);
         setHostId(data.hostId ?? '');
+        setTopDeckEnabled(!!data.topDeckEnabled);
 
         for (const p of data.players ?? []) {
           if (p.id === session.playerId) continue;
@@ -69,7 +71,7 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
           const opponents = (data.players ?? [])
             .filter(p => p.id !== session.playerId)
             .map(p => ({ id: p.id, name: p.name }));
-          onGameStart(opponents);
+          onGameStart(opponents, !!data.topDeckEnabled);
           return;
         }
       } catch { /* ignore network errors */ }
@@ -108,6 +110,8 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
       .map(e => e.name)
       .filter((name, i, arr) => arr.indexOf(name) === i);
 
+    const mtgoCandidate = (parsed.mtgoCommanderCandidate ?? '').trim();
+
     // Autodetect fallback when no Commander section is present.
     const nameCounts = new Map<string, number>();
     for (const entry of allEntries) {
@@ -116,21 +120,27 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
 
     const autodetected = cards
       .filter(c => {
-        const type = c.typeLine.toLowerCase();
-        const isLegendary = type.includes('legendary');
-        const canBeCommander = type.includes('creature') || type.includes('planeswalker');
+        const isViable = isViableCommander(c.typeLine);
         const singleCopy = (nameCounts.get(c.name.toLowerCase()) ?? 0) === 1;
-        return isLegendary && canBeCommander && singleCopy;
+        return isViable && singleCopy;
       })
       .map(c => c.name)
       .filter((name, i, arr) => arr.indexOf(name) === i);
 
-    const options = commanderFromSection.length ? commanderFromSection : autodetected;
+    const mtgoCard = mtgoCandidate
+      ? cards.find(c => c.name.toLowerCase() === mtgoCandidate.toLowerCase())
+      : undefined;
+    const mtgoCandidateIsViable = !!mtgoCard && isViableCommander(mtgoCard.typeLine);
+
+    let options = commanderFromSection.length ? commanderFromSection : autodetected;
+    if (!commanderFromSection.length && mtgoCandidateIsViable) {
+      options = [mtgoCandidate, ...options.filter(n => n.toLowerCase() !== mtgoCandidate.toLowerCase())];
+    }
     setCommanderOptions(options);
 
     const picked = commanderFromSection.length
       ? commanderFromSection[0]
-      : (autodetected[0] ?? '');
+      : (mtgoCandidateIsViable ? mtgoCandidate : (autodetected[0] ?? ''));
     setSelectedCommander(picked);
 
     const { library, commandZone } = splitDeckForCommander(cards, picked);
@@ -190,7 +200,7 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
         .filter(p => p.id !== session.playerId)
         .map(p => ({ id: p.id, name: p.name }));
       gameStartedRef.current = true;
-      onGameStart(opponents);
+      onGameStart(opponents, topDeckEnabled);
     } catch {
       alert('Network error — could not start game.');
     }
@@ -320,4 +330,12 @@ function splitDeckForCommander(cards: GameCard[], commanderName: string): { libr
 
   const library = shuffle(cards.filter((_, i) => i !== index));
   return { library, commandZone: [commanderCard] };
+}
+
+function isViableCommander(typeLine: string): boolean {
+  const type = typeLine.toLowerCase();
+  const isLegendary = type.includes('legendary');
+  const isCreature = type.includes('creature');
+  const isPW = type.includes('planeswalker');
+  return isLegendary && (isCreature || isPW);
 }

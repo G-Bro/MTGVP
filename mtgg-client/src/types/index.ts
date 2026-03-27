@@ -44,6 +44,7 @@ export interface ParsedDeck {
   commander: DeckEntry[];
   main: DeckEntry[];
   errors: string[];
+  mtgoCommanderCandidate?: string;
 }
 
 // ─── Room / lobby ─────────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ export interface RoomInfo {
   code: string;
   status: 'lobby' | 'started' | 'ended';
   hostId: string;
+  topDeckEnabled: boolean;
   players: LobbyPlayer[];
 }
 

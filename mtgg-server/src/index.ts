@@ -34,6 +34,7 @@ interface RoomData {
   code: string;
   hostId: string;
   passwordHash: string | null;
+  topDeckEnabled: boolean;
   players: PlayerRecord[];
   status: 'lobby' | 'started' | 'ended';
   diceRolls: Record<string, number>;
@@ -152,7 +153,7 @@ function publicPlayer(p: PlayerRecord): Omit<PlayerRecord, 'token'> {
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
 async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
-  const body = await request.json<{ hostName?: string; password?: string }>();
+  const body = await request.json<{ hostName?: string; password?: string; topDeckEnabled?: boolean }>();
   if (!body.hostName?.trim()) return err('hostName is required');
 
   // Collision-resistant code generation
@@ -169,6 +170,7 @@ async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
     code,
     hostId,
     passwordHash: body.password ? await hashPassword(body.password) : null,
+    topDeckEnabled: !!body.topDeckEnabled,
     players: [{
       id: hostId, token,
       name: body.hostName.trim(),
@@ -182,7 +184,7 @@ async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
   };
 
   await putRoom(env, room);
-  return json({ code, playerId: hostId, token });
+  return json({ code, playerId: hostId, token, topDeckEnabled: room.topDeckEnabled });
 }
 
 async function handleGetRoom(code: string, env: Env): Promise<Response> {
@@ -192,6 +194,7 @@ async function handleGetRoom(code: string, env: Env): Promise<Response> {
     code:    room.code,
     status:  room.status,
     hostId:  room.hostId,
+    topDeckEnabled: room.topDeckEnabled,
     players: room.players.map(publicPlayer),
     diceRolls: room.diceRolls ?? {},
   });
@@ -228,6 +231,7 @@ async function handleJoin(code: string, request: Request, env: Env): Promise<Res
     playerId,
     token,
     hostId:  room.hostId,
+    topDeckEnabled: room.topDeckEnabled,
     players: room.players.map(publicPlayer),
   });
 }

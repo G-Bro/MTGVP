@@ -11,6 +11,7 @@ export default function HomeScreen({ onSession }: Props) {
   const [name, setName]         = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [password, setPassword] = useState('');
+  const [topDeckEnabled, setTopDeckEnabled] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
 
@@ -22,7 +23,11 @@ export default function HomeScreen({ onSession }: Props) {
       const res  = await fetch(`${WORKER_URL}/rooms`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ hostName: name.trim(), password: password || undefined }),
+        body:    JSON.stringify({
+          hostName: name.trim(),
+          password: password || undefined,
+          topDeckEnabled,
+        }),
       });
       const data = await res.json() as { code?: string; playerId?: string; token?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to create room');
@@ -88,6 +93,14 @@ export default function HomeScreen({ onSession }: Props) {
             </label>
             <label>Room password <span className="optional">(optional)</span>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Leave blank for open room" />
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={topDeckEnabled}
+                onChange={e => setTopDeckEnabled(e.target.checked)}
+              />
+              Enable top decking (search deck for starting 7)
             </label>
             {error && <p className="form-error">{error}</p>}
             <div className="form-actions">

@@ -16,6 +16,26 @@ import type { DeckEntry, ParsedDeck } from '../types';
 export function parseDeck(raw: string): ParsedDeck {
   const result: ParsedDeck = { commander: [], main: [], errors: [] };
 
+  // MTGO export pattern: main deck lines, then a blank line, then commander line(s).
+  const mtgoSplit = raw.replace(/\r/g, '').split(/\n\s*\n+/);
+  if (mtgoSplit.length >= 2) {
+    const trailing = mtgoSplit[mtgoSplit.length - 1]
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .filter(l => !/^\//.test(l));
+
+    // Prefer the last explicit quantity card line from the trailing block.
+    const last = trailing[trailing.length - 1];
+    if (last) {
+      const m = last.match(/^(\d+)[xX]?\s+(.+?)(?:\s+\([A-Z0-9]+\)\s+\d+)?(?:\s+\*[^*]+\*)?$/)
+        ?? last.match(/^([a-zA-Z].*?)(?:\s+\([A-Z0-9]+\)\s+\d+)?$/);
+      if (m) {
+        result.mtgoCommanderCandidate = m[2]?.trim?.() ?? m[1]?.trim?.();
+      }
+    }
+  }
+
   const COMMANDER_SECTIONS = new Set(['commander', 'commanders', 'companion']);
   const SKIP_SECTIONS      = new Set(['sideboard', 'maybeboard', 'tokens', 'maybe board']);
 

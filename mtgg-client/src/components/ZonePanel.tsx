@@ -9,6 +9,8 @@ interface Props {
 export default function ZonePanel({ broadcast }: Props) {
   const { state, dispatch } = useGame();
   const lp = state.localPlayer;
+  const topGraveyard = lp.graveyard[lp.graveyard.length - 1];
+  const topExile = lp.exile[lp.exile.length - 1];
 
   function draw() {
     if (!lp.library.length) return;
@@ -42,6 +44,9 @@ export default function ZonePanel({ broadcast }: Props) {
 
       <div className="zone-box zone-library">
         <h4>Library</h4>
+        <div className="zone-card-preview deck-preview" title="Library">
+          <div className="cardback" />
+        </div>
         <p className="zone-count">{lp.library.length}</p>
         <div className="zone-actions">
           <button className="btn btn-sm" onClick={draw}>Draw</button>
@@ -51,6 +56,13 @@ export default function ZonePanel({ broadcast }: Props) {
 
       <div className="zone-box zone-graveyard">
         <h4>Graveyard</h4>
+        <div className="zone-card-preview" title={topGraveyard?.name ?? 'Graveyard'}>
+          {topGraveyard ? (
+            <img src={topGraveyard.imageUri} alt={topGraveyard.name} className="zone-card-img" draggable={false} />
+          ) : (
+            <div className="zone-card-empty">Empty</div>
+          )}
+        </div>
         <p className="zone-count">{lp.graveyard.length}</p>
         <div className="zone-actions">
           <button className="btn btn-sm btn-ghost" disabled={!lp.graveyard.length} onClick={moveTopFromGraveyardToHand}>
@@ -61,6 +73,13 @@ export default function ZonePanel({ broadcast }: Props) {
 
       <div className="zone-box zone-exile">
         <h4>Exile</h4>
+        <div className="zone-card-preview" title={topExile?.name ?? 'Exile'}>
+          {topExile ? (
+            <img src={topExile.imageUri} alt={topExile.name} className="zone-card-img" draggable={false} />
+          ) : (
+            <div className="zone-card-empty">Empty</div>
+          )}
+        </div>
         <p className="zone-count">{lp.exile.length}</p>
         <div className="zone-actions">
           <button className="btn btn-sm btn-ghost" disabled={!lp.exile.length} onClick={moveTopFromExileToHand}>
