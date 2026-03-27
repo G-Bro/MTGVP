@@ -11,7 +11,8 @@ interface Props {
   onGameStart: (opponents: { id: string; name: string }[], topDeckEnabled: boolean) => void;
 }
 
-const POLL_ROOM_MS = 2500;
+const POLL_ROOM_MS = 3500;
+const POLL_ROOM_HIDDEN_MS = 7000;
 
 export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
   const { dispatch } = useGame();
@@ -75,7 +76,10 @@ export default function Lobby({ session, connectToPeer, onGameStart }: Props) {
           return;
         }
       } catch { /* ignore network errors */ }
-      if (active) setTimeout(pollRoom, POLL_ROOM_MS);
+      if (active) {
+        const delay = document.visibilityState === 'hidden' ? POLL_ROOM_HIDDEN_MS : POLL_ROOM_MS;
+        setTimeout(pollRoom, delay);
+      }
     }
 
     pollRoom();

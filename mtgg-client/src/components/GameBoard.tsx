@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { LocalSession, PeerEvent } from '../types';
 import { useGame } from '../context/GameContext';
 import { WORKER_URL } from '../utils/helpers';
@@ -11,8 +11,39 @@ interface Props {
   broadcast: (event: PeerEvent) => void;
 }
 
+type PublicState = {
+  name: string;
+  life: number;
+  poison: number;
+  handCount: number;
+  libraryCount: number;
+  battlefield: ReturnType<typeof useGame>['state']['localPlayer']['battlefield'];
+  graveyard: ReturnType<typeof useGame>['state']['localPlayer']['graveyard'];
+  exile: ReturnType<typeof useGame>['state']['localPlayer']['exile'];
+  commandZone: ReturnType<typeof useGame>['state']['localPlayer']['commandZone'];
+};
+
+function toPublicState(lp: ReturnType<typeof useGame>['state']['localPlayer']): PublicState {
+  return {
+    name: lp.name,
+    life: lp.life,
+    poison: lp.poison,
+    handCount: lp.hand.length,
+    libraryCount: lp.library.length,
+    battlefield: lp.battlefield,
+    graveyard: lp.graveyard,
+    exile: lp.exile,
+    commandZone: lp.commandZone,
+  };
+}
+
 export default function GameBoard({ session, broadcast }: Props) {
   const { state, applyPeerEvent } = useGame();
+  const lastWorkerStateTsRef = useRef<Record<string, number>>({});
+  const pendingWorkerPostRef = useRef(true);
+  const lastPostedHashRef = useRef('');
+  const lastPostAtRef = useRef(0);
+  const latestPublicStateRef = useRef<PublicState>(toPublicState(state.localPlayer));
   const [cardScale, setCardScale] = useState<number>(() => {
     const raw = localStorage.getItem('mtgg-card-scale');
     const parsed = raw ? Number(raw) : 1;
@@ -24,20 +55,15 @@ export default function GameBoard({ session, broadcast }: Props) {
   }, [cardScale]);
 
   useEffect(() => {
+    latestPublicStateRef.current = toPublicState(state.localPlayer);
+    pendingWorkerPostRef.current = true;
+  }, [state.localPlayer]);
+
+  useEffect(() => {
     const lp = state.localPlayer;
     const syncEvent: PeerEvent = {
       type: 'STATE_SYNC',
-      state: {
-        name: lp.name,
-        life: lp.life,
-        poison: lp.poison,
-        handCount: lp.hand.length,
-        libraryCount: lp.library.length,
-        battlefield: lp.battlefield,
-        graveyard: lp.graveyard,
-        exile: lp.exile,
-        commandZone: lp.commandZone,
-      },
+      state: toPublicState(lp),
     };
 
     broadcast(syncEvent);
@@ -51,51 +77,69 @@ export default function GameBoard({ session, broadcast }: Props) {
     async function syncViaWorker() {
       if (!active) return;
 
-      const lp = state.localPlayer;
-      const publicState = {
-        name: lp.name,
-        life: lp.life,
-        poison: lp.poison,
-        handCount: lp.hand.length,
-        libraryCount: lp.library.length,
-        battlefield: lp.battlefield,
-        graveyard: lp.graveyard,
-        exile: lp.exile,
-        commandZone: lp.commandZone,
-      };
+      const publicState = latestPublicStateRef.current;
+      const hasOpponents = state.opponents.length > 0;
+      const now = Date.now();
+      const stateHash = JSON.stringify(publicState);
+      const shouldPost = hasOpponents && (
+        pendingWorkerPostRef.current
+        || stateHash !== lastPostedHashRef.current
+        || (now - lastPostAtRef.current) > 15000
+      );
 
       try {
-        await fetch(`${WORKER_URL}/rooms/${session.roomCode}/state`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerId: session.playerId,
-            token: session.token,
-            state: publicState,
-          }),
-        });
+        if (shouldPost) {
+          await fetch(`${WORKER_URL}/rooms/${session.roomCode}/state`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playerId: session.playerId,
+              token: session.token,
+              state: publicState,
+            }),
+          });
 
-        const res = await fetch(
-          `${WORKER_URL}/rooms/${session.roomCode}/state?playerId=${session.playerId}&token=${session.token}`,
-        );
-        if (res.ok) {
-          const data = await res.json() as { states?: Record<string, typeof publicState> };
-          const states = data.states ?? {};
-          for (const [playerId, oppState] of Object.entries(states)) {
-            if (playerId === session.playerId) continue;
-            applyPeerEvent(playerId, { type: 'STATE_SYNC', state: oppState });
+          pendingWorkerPostRef.current = false;
+          lastPostedHashRef.current = stateHash;
+          lastPostAtRef.current = now;
+        }
+
+        if (hasOpponents) {
+          const res = await fetch(
+            `${WORKER_URL}/rooms/${session.roomCode}/state?playerId=${session.playerId}&token=${session.token}`,
+          );
+          if (res.ok) {
+            const data = await res.json() as {
+              states?: Record<string, { state: PublicState; ts: number }>;
+            };
+            const states = data.states ?? {};
+            for (const [playerId, wrappedState] of Object.entries(states)) {
+              if (playerId === session.playerId) continue;
+
+              const lastTs = lastWorkerStateTsRef.current[playerId] ?? 0;
+              if (wrappedState.ts <= lastTs) continue;
+
+              lastWorkerStateTsRef.current[playerId] = wrappedState.ts;
+              applyPeerEvent(playerId, { type: 'STATE_SYNC', state: wrappedState.state });
+            }
           }
         }
       } catch {
         // Ignore transient worker sync failures.
       }
 
-      if (active) setTimeout(syncViaWorker, 900);
+      const nextDelay = document.visibilityState === 'hidden'
+        ? 4500
+        : hasOpponents
+          ? (shouldPost ? 1300 : 2000)
+          : 6000;
+
+      if (active) setTimeout(syncViaWorker, nextDelay);
     }
 
     syncViaWorker();
     return () => { active = false; };
-  }, [session.roomCode, session.playerId, session.token, state.localPlayer, applyPeerEvent]);
+  }, [session.roomCode, session.playerId, session.token, applyPeerEvent, state.opponents.length]);
 
   return (
     <div className="game-shell" style={{ ['--card-scale' as string]: String(cardScale) }}>

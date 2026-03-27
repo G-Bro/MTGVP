@@ -110,7 +110,10 @@ export default function DiceRoll({ session, broadcast, onOrderSet }: Props) {
       } catch {
         // ignore transient poll failures
       }
-      if (active && !allRolled) setTimeout(pollDice, 1000);
+      if (active && !allRolled) {
+        const delay = document.visibilityState === 'hidden' ? 3500 : 1800;
+        setTimeout(pollDice, delay);
+      }
     }
 
     pollDice();

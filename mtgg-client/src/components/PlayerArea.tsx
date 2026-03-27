@@ -19,6 +19,7 @@ export default function PlayerArea({ broadcast }: Props) {
   const [menu, setMenu]             = useState<ContextMenuState | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
   const [dragGhost, setDragGhost] = useState<{
     card: GameCard;
     x: number;
@@ -277,12 +278,22 @@ export default function PlayerArea({ broadcast }: Props) {
   }
 
   useEffect(() => {
+    if (!hoveredCardId) return;
+    const stillExists = lp.battlefield.some(c => c.instanceId === hoveredCardId)
+      || lp.commandZone.some(c => c.instanceId === hoveredCardId);
+    if (!stillExists) setHoveredCardId(null);
+  }, [hoveredCardId, lp.battlefield, lp.commandZone]);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       if ((e.target as HTMLElement)?.closest('input, textarea, select')) return;
       if (e.key.toLowerCase() !== 't') return;
+      if (e.repeat) return;
 
-      const ids = selectedIds.length ? selectedIds : (activeCardId ? [activeCardId] : []);
+      const ids = hoveredCardId
+        ? [hoveredCardId]
+        : (selectedIds.length ? selectedIds : (activeCardId ? [activeCardId] : []));
       if (!ids.length) return;
 
       e.preventDefault();
@@ -291,7 +302,7 @@ export default function PlayerArea({ broadcast }: Props) {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedIds, activeCardId, lp.battlefield, lp.commandZone]);
+  }, [hoveredCardId, selectedIds, activeCardId, lp.battlefield, lp.commandZone]);
 
   function toggleTap(instanceId: string, currentlyTapped: boolean) {
     applyAndBroadcast(
@@ -385,6 +396,8 @@ export default function PlayerArea({ broadcast }: Props) {
             key={card.instanceId}
             className={`bf-card-wrap command-card ${selectedIds.includes(card.instanceId) ? 'selected' : ''}`}
             style={{ left: `${card.position.x}%`, top: `${card.position.y}%` }}
+            onMouseEnter={() => setHoveredCardId(card.instanceId)}
+            onMouseLeave={() => setHoveredCardId(prev => (prev === card.instanceId ? null : prev))}
           >
             <PlayCard
               card={card}
@@ -406,6 +419,8 @@ export default function PlayerArea({ broadcast }: Props) {
             key={card.instanceId}
             className={`bf-card-wrap ${selectedIds.includes(card.instanceId) ? 'selected' : ''}`}
             style={{ left: `${card.position.x}%`, top: `${card.position.y}%` }}
+            onMouseEnter={() => setHoveredCardId(card.instanceId)}
+            onMouseLeave={() => setHoveredCardId(prev => (prev === card.instanceId ? null : prev))}
           >
             <PlayCard
               card={card}

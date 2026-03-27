@@ -2,7 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import type { SignalEnvelope, SignalType } from '../types';
 import { WORKER_URL } from '../utils/helpers';
 
-const POLL_INTERVAL_MS = 1500;
+const POLL_INTERVAL_IDLE_MS = 2400;
+const POLL_INTERVAL_ACTIVE_MS = 900;
+const POLL_INTERVAL_HIDDEN_MS = 5000;
 
 interface UseSignalingOptions {
   roomCode:  string;
@@ -31,6 +33,7 @@ export function useSignaling({ roomCode, playerId, token, onSignals, enabled }: 
 
     async function poll() {
       if (!active) return;
+      let sawSignals = false;
       try {
         const res = await fetch(
           `${WORKER_URL}/rooms/${roomCode}/signals?playerId=${playerId}&token=${token}`,
@@ -38,13 +41,19 @@ export function useSignaling({ roomCode, playerId, token, onSignals, enabled }: 
         if (res.ok) {
           const data = await res.json() as { signals: SignalEnvelope[] };
           if (data.signals?.length) {
+            sawSignals = true;
             onSignalsRef.current(data.signals);
           }
         }
       } catch {
         // Network error – ignore and keep polling
       }
-      if (active) setTimeout(poll, POLL_INTERVAL_MS);
+      if (active) {
+        const delay = document.visibilityState === 'hidden'
+          ? POLL_INTERVAL_HIDDEN_MS
+          : (sawSignals ? POLL_INTERVAL_ACTIVE_MS : POLL_INTERVAL_IDLE_MS);
+        setTimeout(poll, delay);
+      }
     }
 
     poll();
