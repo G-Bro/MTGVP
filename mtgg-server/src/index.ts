@@ -111,6 +111,14 @@ function err(message: string, status = 400): Response {
   return json({ error: message }, status);
 }
 
+async function parseJsonBody<T>(request: Request): Promise<T | null> {
+  try {
+    return await request.json<T>();
+  } catch {
+    return null;
+  }
+}
+
 // ─── KV helpers ───────────────────────────────────────────────────────────────
 
 async function getRoom(env: Env, code: string): Promise<RoomData | null> {
@@ -153,7 +161,8 @@ function publicPlayer(p: PlayerRecord): Omit<PlayerRecord, 'token'> {
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
 async function handleCreateRoom(request: Request, env: Env): Promise<Response> {
-  const body = await request.json<{ hostName?: string; password?: string; topDeckEnabled?: boolean }>();
+  const body = await parseJsonBody<{ hostName?: string; password?: string; topDeckEnabled?: boolean }>(request);
+  if (!body) return err('Invalid JSON body', 400);
   if (!body.hostName?.trim()) return err('hostName is required');
 
   // Collision-resistant code generation
@@ -206,7 +215,8 @@ async function handleJoin(code: string, request: Request, env: Env): Promise<Res
   if (room.status !== 'lobby')        return err('Game already started');
   if (room.players.length >= MAX_PLAYERS) return err('Room is full');
 
-  const body = await request.json<{ playerName?: string; password?: string }>();
+  const body = await parseJsonBody<{ playerName?: string; password?: string }>(request);
+  if (!body) return err('Invalid JSON body', 400);
   if (!body.playerName?.trim()) return err('playerName is required');
 
   if (room.passwordHash) {
@@ -240,7 +250,8 @@ async function handleReady(code: string, request: Request, env: Env): Promise<Re
   const room = await getRoom(env, code);
   if (!room) return err('Room not found', 404);
 
-  const body = await request.json<{ playerId?: string; token?: string; deckLocked?: boolean }>();
+  const body = await parseJsonBody<{ playerId?: string; token?: string; deckLocked?: boolean }>(request);
+  if (!body) return err('Invalid JSON body', 400);
   const player = room.players.find(p => p.id === body.playerId);
   if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
 
@@ -254,7 +265,8 @@ async function handleStart(code: string, request: Request, env: Env): Promise<Re
   const room = await getRoom(env, code);
   if (!room) return err('Room not found', 404);
 
-  const body = await request.json<{ playerId?: string; token?: string }>();
+  const body = await parseJsonBody<{ playerId?: string; token?: string }>(request);
+  if (!body) return err('Invalid JSON body', 400);
   const player = room.players.find(p => p.id === body.playerId);
   if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
   if (room.hostId !== body.playerId)   return err('Only the host can start the game');
@@ -272,10 +284,11 @@ async function handlePostSignal(code: string, request: Request, env: Env): Promi
   const room = await getRoom(env, code);
   if (!room) return err('Room not found', 404);
 
-  const body = await request.json<{
+  const body = await parseJsonBody<{
     fromId?: string; token?: string;
     toId?: string; type?: SignalType; payload?: unknown;
-  }>();
+  }>(request);
+  if (!body) return err('Invalid JSON body', 400);
 
   const fromPlayer = room.players.find(p => p.id === body.fromId);
   if (!fromPlayer || !body.token || !verifyToken(fromPlayer, body.token)) return err('Unauthorized', 403);
@@ -316,7 +329,8 @@ async function handlePostDice(code: string, request: Request, env: Env): Promise
   const room = await getRoom(env, code);
   if (!room) return err('Room not found', 404);
 
-  const body = await request.json<{ playerId?: string; token?: string; value?: number }>();
+  const body = await parseJsonBody<{ playerId?: string; token?: string; value?: number }>(request);
+  if (!body) return err('Invalid JSON body', 400);
   const player = room.players.find(p => p.id === body.playerId);
   if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
 
@@ -348,11 +362,12 @@ async function handlePostState(code: string, request: Request, env: Env): Promis
   const room = await getRoom(env, code);
   if (!room) return err('Room not found', 404);
 
-  const body = await request.json<{
+  const body = await parseJsonBody<{
     playerId?: string;
     token?: string;
     state?: Omit<PublicPlayerState, 'ts'>;
-  }>();
+  }>(request);
+  if (!body) return err('Invalid JSON body', 400);
 
   const player = room.players.find(p => p.id === body.playerId);
   if (!player || !body.token || !verifyToken(player, body.token)) return err('Unauthorized', 403);
@@ -393,6 +408,10 @@ export default {
     const url      = new URL(request.url);
     const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/');
     // segments: ['rooms'], ['rooms', CODE], ['rooms', CODE, 'join'], etc.
+
+    if (!env?.ROOMS) {
+      return err('Server misconfigured: KV binding ROOMS is missing', 500);
+    }
 
     try {
       const [seg0, code, action] = segments;
